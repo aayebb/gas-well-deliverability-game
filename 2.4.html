@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gas Well Test Simulator V2.4</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --panel-color: #2d2d2d;
+            --text-color: #e0e0e0;
+            --accent-color: #00bcd4;
+            /* Cyan */
+            --danger-color: #ff5252;
+            --success-color: #69f0ae;
+            --grid-color: #404040;
+            --rate-color: #ff9800;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: auto;
+            /* Allow scrolling generally, but grid logic tries to fit */
+        }
+
+        /* Well Selection Modal - Foolproof Mobile */
+        #modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.98);
+            z-index: 100000;
+            /* Max Z */
+            display: flex;
+            align-items: center;
+            /* Center Vertically if space allows */
+            justify-content: center;
+            overflow-y: auto;
+            /* Force scrollable */
+            padding: 20px;
+        }
+
+        #modal-content {
+            background: var(--panel-color);
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid var(--accent-color);
+            max-width: 800px;
+            width: 100%;
+            margin: auto;
+            /* Center in scroll container */
+        }
+
+        h2 {
+            margin-top: 0;
+            color: var(--accent-color);
+        }
+
+        p {
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+
+        .well-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+        }
+
+        /* Top Bar - Compact */
+        #top-bar {
+            background-color: var(--panel-color);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--grid-color);
+            flex-shrink: 0;
+        }
+
+        .digital-display {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        #well-info {
+            font-size: 1rem;
+            color: #aaa;
+            margin-right: 20px;
+        }
+
+        #status-indicator {
+            padding: 5px 15px;
+            border-radius: 4px;
+            background-color: #333;
+            border: 1px solid #555;
+        }
+
+        .status-shut-in {
+            color: var(--danger-color);
+            text-shadow: 0 0 8px var(--danger-color);
+        }
+
+        .status-flowing {
+            color: var(--success-color);
+            text-shadow: 0 0 8px var(--success-color);
+        }
+
+        /* Main Dashboard Layout */
+        .dashboard {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            overflow: hidden;
+            /* Desktop: Try to hide scroll, internal scroll if needed */
+        }
+
+        @media (max-width: 800px) {
+            .dashboard {
+                overflow: auto;
+            }
+
+            /* Mobile: Just scroll normally */
+        }
+
+        .header {
+            background: var(--panel-color);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid #444;
+        }
+
+        .main-display {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            gap: 10px;
+            min-height: 0;
+            /* Allow shrink */
+        }
+
+        .readout-panel {
+            display: flex;
+            justify-content: space-between;
+            background: #222;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+
+        /* V11 Update: Charts Side-by-Side on Desktop */
+        /* V13 Update: Charts Vertical Stack (Top/Bottom) */
+        .chart-row {
+            display: flex;
+            flex-direction: column;
+            /* Stacked Vertically */
+            flex-grow: 1;
+            gap: 15px;
+            min-height: 0;
+            /* Crucial for nesting flex */
+        }
+
+        .chart-container {
+            flex: 1;
+            border: 1px solid var(--grid-color);
+            background: #000;
+            position: relative;
+            min-height: 300px;
+            /* Taller charts for better visibility */
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Bottom Controls - Compact */
+        .control-panel {
+            background: var(--panel-color);
+            padding: 15px;
+            border-top: 1px solid #444;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            flex-shrink: 0;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group.wide {
+            flex-grow: 1;
+        }
+
+        .label {
+            font-size: 0.8rem;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        /* Slider Styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 24px;
+            width: 24px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            cursor: pointer;
+            margin-top: -10px;
+            box-shadow: 0 0 10px var(--accent-color);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: var(--grid-color);
+            border-radius: 2px;
+        }
+
+        input[type=range]:focus {
+            outline: none;
+        }
+
+        /* Buttons */
+        button {
+            background-color: var(--accent-color);
+            color: #000;
+            border: none;
+            padding: 12px 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.4);
+            filter: brightness(1.1);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.secondary {
+            background-color: var(--grid-color);
+            color: var(--text-color);
+        }
+
+        /* Slider Control Group */
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .slider-btn {
+            background: #444;
+            color: #fff;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #666;
+            cursor: pointer;
+        }
+
+        .slider-btn:active {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #000;
+        }
+
+        /* Update Slider Track to fit */
+        input[type=range] {
+            flex-grow: 1;
+        }
+
+        #choke-display {
+            font-family: monospace;
+            font-size: 1.2rem;
+            color: var(--accent-color);
+            width: 50px;
+            text-align: right;
+        }
+
+        /* Mobile Adjustments */
+        @media (max-width: 800px) {
+            .chart-row {
+                flex-direction: column;
+                /* Stack charts on tablet/mobile */
+                min-height: 600px;
+                /* Ensure space */
+            }
+
+            .well-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .control-panel {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .slider-group {
+                justify-content: space-between;
+            }
+        }
+
+        font-size: 0.9rem;
+        }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Well Selection Modal -->
+    <div id="modal-overlay">
+        <div id="modal-content">
+            <h2>Select a Well to Test</h2>
+            <p>Choose a well from the field to begin analysis.</p>
+            <div class="well-grid" id="well-grid">
+                <!-- Generated by JS -->
+            </div>
+            <div style="margin-top: 30px; font-size: 0.85rem; color: #888;">
+                &copy; 2026 Ts. Dr. Mohamad Arif Ibrahim. All rights reserved.<br>
+                Department of Petroleum Engineering, Faculty of Chemical and Energy Engineering, Universiti Teknologi Malaysia.<br>
+                Gas Well Test Simulator V2.4
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <div class="header">
+            <div id="well-info" class="well-name">Select Well</div>
+            <div id="clock" class="digital-display">Time: 00:00</div>
+        </div>
+
+        <div class="main-display">
+            <div class="readout-panel">
+                <div id="pressure-readout" class="digital-display" style="font-size:1.2rem;">Pwf: --- psi</div>
+                <div id="status-indicator" class="digital-display status-shut-in" style="font-size:1rem;">SHUT-IN</div>
+            </div>
+
+            <!-- V11: Charts Side-by-Side Wrapper -->
+            <div class="chart-row">
+                <div class="chart-container">
+                    <canvas id="pressureChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="rateChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- V11: Compact Bottom Controls -->
+        <div class="control-panel">
+            <div class="control-group wide">
+                <div class="label">Choke Opening</div>
+                <div class="slider-group">
+                    <button class="slider-btn" onclick="changeChoke(-1)">-</button>
+                    <input type="range" id="choke-slider" min="0" max="100" value="0" disabled>
+                    <button class="slider-btn" onclick="changeChoke(1)">+</button>
+                    <div id="choke-display">0%</div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="label">Actions</div>
+                <div style="display:flex; gap:10px;">
+                    <button id="start-btn" onclick="toggleGame()" disabled>START</button>
+                    <button class="secondary" onclick="resetSimulation()">RESET</button>
+                    <button class="secondary" onclick="exportData()" id="export-btn" disabled>CSV</button>
+                </div>
+            </div>
+        </div>
+        
+        <div style="text-align: center; padding: 10px; font-size: 0.85rem; color: #888; background: var(--panel-color); border-top: 1px solid #444; flex-shrink: 0;">
+            &copy; 2026 Ts. Dr. Mohamad Arif Ibrahim. All rights reserved.<br>
+            Department of Petroleum Engineering, Faculty of Chemical and Energy Engineering, Universiti Teknologi Malaysia.<br>
+            Gas Well Test Simulator V2.4
+        </div>
+    </div>
+
+    <script>
+        // --- CONSTANTS & CONFIG ---
+        const TICK_RATE_MS = 100; // Update real world every 100ms
+        const GAME_MINUTES_PER_UPDATE = 1; // 100ms tick = 1 game minute
+
+        const MAX_HOURS = 72;
+        const MAX_MINUTES = MAX_HOURS * 60;
+
+        // --- STATE ---
+        let gameRunning = false;
+        let gameTime = 0; // in minutes
+        let timerInterval = null;
+        let flowHistory = [];
+        let currentWell = null;
+        let wells = [];
+
+        // --- GENERATE WELLS ---
+        // V9 Update: Fixed Mixed Order (Hardcoded Properties)
+        // No randomization on reload. 
+        // Total Capacity: ~100,000 MSCF/D
+
+        const wellsData = [
+            // Well 1: Fast
+            { id: 1, name: 'Well 1', slope: 2, maxRate: 20000, type: 'Fast', initialPressure: 3000 },
+            // Well 2: Slow
+            { id: 2, name: 'Well 2', slope: 55, maxRate: 2000, type: 'Slow', initialPressure: 800 },
+            // Well 3: Medium
+            { id: 3, name: 'Well 3', slope: 20, maxRate: 8000, type: 'Med', initialPressure: 1500 },
+            // Well 4: Fast
+            { id: 4, name: 'Well 4', slope: 5, maxRate: 14000, type: 'Fast', initialPressure: 2800 },
+            // Well 5: Medium
+            { id: 5, name: 'Well 5', slope: 25, maxRate: 7000, type: 'Med', initialPressure: 2100 },
+            // Well 6: Slow
+            { id: 6, name: 'Well 6', slope: 65, maxRate: 1000, type: 'Slow', initialPressure: 1200 },
+            // Well 7: Fast
+            { id: 7, name: 'Well 7', slope: 3, maxRate: 18000, type: 'Fast', initialPressure: 2900 },
+            // Well 8: Medium
+            { id: 8, name: 'Well 8', slope: 15, maxRate: 9000, type: 'Med', initialPressure: 2400 },
+            // Well 9: Slow
+            { id: 9, name: 'Well 9', slope: 45, maxRate: 2500, type: 'Slow', initialPressure: 1000 },
+            // Well 10: Medium
+            { id: 10, name: 'Well 10', slope: 30, maxRate: 6000, type: 'Med', initialPressure: 1800 },
+            // Well 11: Fast
+            { id: 11, name: 'Well 11', slope: 8, maxRate: 12000, type: 'Fast', initialPressure: 2600 },
+            // Well 12: Slow (Hardest)
+            { id: 12, name: 'Well 12', slope: 75, maxRate: 500, type: 'Slow', initialPressure: 900 },
+            // Well 13: Extra Well
+            { id: 13, name: 'Well 13', slope: 40, maxRate: 4000, type: 'Slow', initialPressure: 1400 },
+            // Well 14: Extra Well
+            { id: 14, name: 'Well 14', slope: 35, maxRate: 5000, type: 'Med', initialPressure: 1600 }
+        ];
+
+        // Assign directly to wells array
+        wells = wellsData;
+
+        // --- DOM ELEMENTS ---
+        const clockEl = document.getElementById('clock');
+        const statusEl = document.getElementById('status-indicator');
+        const sliderEl = document.getElementById('choke-slider');
+        const chokeDisplayEl = document.getElementById('choke-display');
+        const startBtnEl = document.getElementById('start-btn');
+        const exportBtnEl = document.getElementById('export-btn');
+        const pressureReadoutEl = document.getElementById('pressure-readout');
+        const wellInfoEl = document.getElementById('well-info');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const wellGrid = document.getElementById('well-grid');
+
+        // --- INIT MODAL ---
+        wells.forEach(well => {
+            const btn = document.createElement('button');
+            btn.className = 'well-btn';
+            btn.textContent = well.name;
+            btn.onclick = () => selectWell(well);
+            wellGrid.appendChild(btn);
+        });
+
+        // V10 Update: Change Choke Helper
+        function changeChoke(delta) {
+            if (sliderEl.disabled) return;
+            let val = parseInt(sliderEl.value);
+            val += delta;
+            val = Math.max(0, Math.min(100, val)); // Clamp 0-100
+            sliderEl.value = val;
+
+            // Trigger Event
+            sliderEl.dispatchEvent(new Event('input'));
+        }
+
+        function selectWell(well) {
+            currentWell = well;
+            // V6 Update: Hide Max Rate (Secret)
+            wellInfoEl.textContent = `Selected: ${well.name}`;
+            modalOverlay.style.display = 'none';
+            // Unlock controls
+            startBtnEl.disabled = false;
+
+            // Reset Simulation
+            resetSimulation();
+        }
+
+        function resetSimulation() {
+            gameTime = 0;
+            flowHistory = [{ time: 0, rate: 0 }];
+            updateClock(0);
+            updatePressureReadout(currentWell.initialPressure);
+            sliderEl.value = 0;
+            chokeDisplayEl.textContent = "0%";
+            statusEl.textContent = "Status: SHUT-IN";
+            statusEl.className = "digital-display status-shut-in";
+            sliderEl.disabled = true;
+
+            // Reset Charts
+            pressureChart.data.datasets[0].data = [{ x: 0, y: currentWell.initialPressure }];
+            rateChart.data.datasets[0].data = [{ x: 0, y: 0 }];
+
+            // Reset Y-Axis Maxes dynamically based on selection
+            pressureChart.options.scales.y.suggestedMax = currentWell.initialPressure + 500;
+            delete rateChart.options.scales.y.max;
+            rateChart.options.scales.y.suggestedMax = 10; // Start small
+
+            pressureChart.update();
+            rateChart.update();
+        }
+
+        // --- CHART SETUP ---
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: '#fff' } } },
+            scales: {
+                x: {
+                    type: 'linear',
+                    min: 0,
+                    max: MAX_MINUTES, // 72 Hours Fixed
+                    title: { display: true, text: 'Time (Hours)', color: '#aaa' },
+                    grid: { color: '#333' },
+                    ticks: { color: '#aaa', stepSize: 240, callback: v => v / 60 } // Every 4 hours
+                }
+            }
+        };
+
+        // Pressure Chart
+        const pCtx = document.getElementById('pressureChart').getContext('2d');
+        const pressureChart = new Chart(pCtx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Bottomhole Pressure (psi)',
+                    borderColor: '#00bcd4',
+                    backgroundColor: 'rgba(0, 188, 212, 0.1)',
+                    borderWidth: 2,
+                    data: [],
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        title: { display: true, text: 'Pressure (psi)', color: '#aaa' },
+                        grid: { color: '#333' },
+                        ticks: { color: '#aaa' },
+                        suggestedMin: 0,
+                        suggestedMax: 5500
+                    }
+                }
+            }
+        });
+
+        // Rate Chart
+        const rCtx = document.getElementById('rateChart').getContext('2d');
+        const rateChart = new Chart(rCtx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Gas Flow Rate (MSCF/D)',
+                    borderColor: '#ff9800',
+                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                    borderWidth: 2,
+                    data: [],
+                    stepped: true, // Rate steps conform to choke changes
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        title: { display: true, text: 'Flow Rate (MSCF/D)', color: '#aaa' },
+                        grid: { color: '#333' },
+                        ticks: { color: '#aaa' },
+                        beginAtZero: true,
+                        suggestedMax: 10 // Start small, let Chart.js auto-expand
+                    }
+                }
+            }
+        });
+
+        // --- PHYSICS ENGINE ---
+        function calculatePressure(currentTime, historyOverride = null) {
+            let sumDrawdown = 0;
+            const m = currentWell.slope;
+            const history = historyOverride || flowHistory;
+
+            for (let i = 1; i < history.length; i++) {
+                const q_new = history[i].rate;
+                const q_old = history[i - 1].rate;
+                const changeInRate = q_new - q_old;
+                const eventTime = history[i].time;
+
+                if (eventTime >= currentTime) continue;
+
+                const deltaTime = currentTime - eventTime;
+                // Log(t) approx.
+                sumDrawdown += changeInRate * Math.log10(deltaTime + 1);
+            }
+
+            // V12: Return raw drawdown for clamping logic
+            return {
+                rawDrawdown: m * sumDrawdown,
+                maxAvailableP: currentWell.initialPressure
+            };
+        }
+
+        // --- GAME LOOP ---
+        function startGameLoop() {
+            if (timerInterval) clearInterval(timerInterval);
+
+            timerInterval = setInterval(() => {
+                if (!gameRunning) return;
+
+                // Stop at 72 hours
+                if (gameTime >= MAX_MINUTES) {
+                    gameRunning = false;
+                    startBtnEl.textContent = "Test Complete";
+                    startBtnEl.disabled = true;
+                    sliderEl.disabled = true;
+                    clearInterval(timerInterval);
+                    alert("72 Hour Test Complete.\nPlease Export your data.");
+                    exportBtnEl.disabled = false;
+                    return;
+                }
+
+                // 1. Advance Time
+                gameTime += GAME_MINUTES_PER_UPDATE;
+
+                // 2. Physics & Clamping Logic (V12 Fix)
+                const lastEvent = flowHistory[flowHistory.length - 1];
+                let requestedRatePct = lastEvent.rate;
+
+                // Calculate theoretical potential pressure
+                const phys = calculatePressure(gameTime);
+                let Pwf = phys.maxAvailableP - phys.rawDrawdown;
+
+                let actualDisplayRate = (requestedRatePct / 100) * currentWell.maxRate;
+
+                // --- V12 CLAMPING LOGIC ---
+                // If Pwf would drop below 0 (Vacuum), we must clamp the rate.
+                if (Pwf < 0) {
+                    Pwf = 0;
+                    // Reverse engineer: The well cannot sustain this rate.
+                    // Max sustainable drawdown
+                    // ratio = currentWell.initialPressure / rawDrawdown.
+                    // Actual Output = Requested * ratio.
+                    const clampRatio = phys.maxAvailableP / phys.rawDrawdown;
+                    actualDisplayRate = actualDisplayRate * clampRatio;
+                }
+
+                // Add Noise
+                const noise = (Math.random() - 0.5) * 5;
+                Pwf = Math.max(0, Pwf + noise);
+
+                // 3. Update UI
+                updateClock(gameTime);
+                updatePressureReadout(Pwf);
+
+                // 4. Update Charts
+                pressureChart.data.datasets[0].data.push({ x: gameTime, y: Pwf });
+                rateChart.data.datasets[0].data.push({ x: gameTime, y: actualDisplayRate });
+
+                pressureChart.update();
+                rateChart.update();
+
+            }, TICK_RATE_MS);
+        }
+
+        // --- EVENT HANDLERS ---
+        sliderEl.addEventListener('input', (e) => {
+            const newRatePct = parseFloat(e.target.value);
+            const mscfd = Math.round((newRatePct / 100) * currentWell.maxRate);
+
+            // V5 Update: Show Percentage on Slider (Input)
+            chokeDisplayEl.textContent = `${newRatePct}%`;
+
+            if (newRatePct > 0) {
+                statusEl.textContent = "Status: FLOWING";
+                statusEl.className = "digital-display status-flowing";
+            } else {
+                statusEl.textContent = "Status: SHUT-IN";
+                statusEl.className = "digital-display status-shut-in";
+            }
+
+            if (gameRunning) {
+                const lastEvent = flowHistory[flowHistory.length - 1];
+                if (lastEvent.time === gameTime) {
+                    lastEvent.rate = newRatePct;
+                } else {
+                    flowHistory.push({ time: gameTime, rate: newRatePct });
+                }
+
+                // Immediate Chart Update: Use MSCF/D (Output)
+                rateChart.data.datasets[0].data.push({ x: gameTime, y: mscfd });
+                rateChart.update();
+            }
+        });
+
+        function toggleGame() {
+            if (!gameRunning) {
+                if (gameTime >= MAX_MINUTES) return;
+                gameRunning = true;
+                startBtnEl.textContent = "Test Running...";
+                startBtnEl.style.backgroundColor = "#ff9800"; // Orange
+                startBtnEl.disabled = true; // No pausing
+                startBtnEl.style.cursor = "not-allowed";
+                startBtnEl.style.opacity = "0.7";
+
+                sliderEl.disabled = false;
+                exportBtnEl.disabled = false;
+                startGameLoop();
+            }
+        }
+
+        function updateClock(minutes) {
+            const hrs = Math.floor(minutes / 60);
+            const mins = Math.floor(minutes % 60);
+            const str = `Time: ${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+            clockEl.textContent = str;
+        }
+
+        function updatePressureReadout(p) {
+            pressureReadoutEl.textContent = `Pwf: ${p.toFixed(1)} psi`;
+        }
+
+        async function exportData() {
+            let csvContent = "";
+            csvContent += `Well Name,${currentWell.name}\n`;
+            csvContent += `Slope Factor,${currentWell.slope.toFixed(2)}\n`;
+            csvContent += `Max Rate (MSCF/D),${currentWell.maxRate}\n`;
+            csvContent += `Initial Reservoir Pressure (PSI),${currentWell.initialPressure}\n`;
+            csvContent += "Time_Minutes,Pressure_PSI,Rate_MSCFD\n";
+
+            for (let t = 0; t <= gameTime; t++) {
+                let currentRatePct = 0;
+                for (let i = 0; i < flowHistory.length; i++) {
+                    if (flowHistory[i].time <= t) {
+                        currentRatePct = flowHistory[i].rate;
+                    } else {
+                        break;
+                    }
+                }
+                const p = calculatePressure(t);
+                const rateMscfd = (currentRatePct / 100) * currentWell.maxRate;
+                csvContent += `${t},${p.maxAvailableP - p.rawDrawdown},${rateMscfd.toFixed(0)}\n`;
+            }
+
+            const fileName = `${currentWell.name.replace(' ', '_')}_test_data.csv`;
+
+            // Try File System Access API
+            if (window.showSaveFilePicker) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: fileName,
+                        types: [{
+                            description: 'CSV File',
+                            accept: { 'text/csv': ['.csv'] },
+                        }],
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(csvContent);
+                    await writable.close();
+                    return; // Success
+                } catch (err) {
+                    if (err.name !== 'AbortError') {
+                        console.error('SaveFilePicker failed:', err);
+                    } else {
+                        return; // User cancelled
+                    }
+                    // Fallback if error (not abort)
+                }
+            }
+
+            // Fallback to classic download
+            const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", fileName);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+    </script>
+</body>
+
+</html>
